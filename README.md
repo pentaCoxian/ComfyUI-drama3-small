@@ -73,6 +73,23 @@ Measured with a 29 s reference clip, four kinds of line, CUDA graphs on, and Com
 - **`streaming`:** decodes the audio in 2-second blocks while it is generated and moves each block to system RAM. On long takes it lowers the memory PyTorch reserves by about 1 GB. The audio is the same.
 - **Fallback paths, measured on an RTX 4090:** without CUDA graphs, about 1× real time. Without Triton (pure PyTorch kernels), about 0.2× real time.
 
+### Windows 11 (RTX 5090, PCIe 5.0 x16)
+
+Measured with the engine called directly: one 55 s English take of 7 chunks (no reference) per row, CUDA graphs on, Python 3.12, PyTorch 2.14.1+cu130, `triton-windows` 3.8.0.post29. VRAM is the peak of PyTorch's reserved memory in that process (Windows does not report VRAM per process).
+
+| `expert_offload` | VRAM | Speed (audio seconds per second) | Decoding |
+|---|---|---|---|
+| none | 10.2 GB | 2.3× | 68.6 frames/s |
+| half | 7.6 GB | 1.25× | 32 frames/s |
+| all | 4.8 GB | 0.86× | 21 frames/s |
+
+- **Through ComfyUI** v0.38.0 (DynamicVRAM on): 62–65 frames/s with `none`. The CUDA graphs were captured; the fallback to eager decoding was never needed. Generate, keep and clone workflows, Japanese text, a 58 s take with and without `streaming`, interrupt, and `keep_model_loaded` off all worked.
+- **Same audio:** for a given seed the audio was bit-identical across `none` / `half` / `all` (four lines) and with CUDA graphs on or off (three lines). The pure-PyTorch fallback gives different audio.
+- **Fallback paths:** without CUDA graphs (`DRAMA3_CUDA_GRAPH=0`) 11 frames/s, about 0.45× real time. Without Triton (`DRAMA3_NO_TRITON=1`) 4.5 frames/s, about 0.18×.
+- **`expert_offload` is slower here** than in the RTX 4090 rows above although the link is faster (PCIe 5.0 x16). I did not investigate why.
+- **System memory:** the Windows commit charge rose by about 15 GiB while the model was loaded (about 18 GiB with `all`, which pins 5.2 GB of RAM); `keep_model_loaded` off moves the weights into system RAM.
+- **Toolchain:** the machine had a CUDA Toolkit 13.1 and Visual Studio installed. I did not test whether `triton-windows` also works without them.
+
 ## How it works
 
 `drama3_torch/` is a self-contained inference engine:
@@ -96,7 +113,7 @@ Verification against the reference implementations:
 
 - **Voice design was not a training target.** The descriptions steer gender, age, pitch and texture reliably, but they are not precise.
 - **Weaknesses inherited from Drama 3:** `[gasps]` at the start of a line, `<slow>` spans, and codes or numbers such as "UA 837". Write those out as words.
-- **Tested hardware:** only NVIDIA GPUs on Linux (RTX 5090, RTX 4090). AMD (ROCm), Windows and Apple Silicon should work but are untested.
+- **Tested hardware:** NVIDIA GPUs on Linux (RTX 5090, RTX 4090) and on Windows 11 (RTX 5090, see [Windows 11](#windows-11-rtx-5090-pcie-50-x16)). AMD (ROCm) and Apple Silicon should work but are untested.
 
 ## License and acceptable use
 
