@@ -52,6 +52,21 @@ def main() -> None:
         kernels.HAS_TRITON = True
         print("IQ3_XXS Triton dequant matches torch:", torch.equal(fast, ref))
 
+        # The expert kernel must give the same bits for every tile size, with the banks in VRAM or in pinned host memory.
+        x = torch.randn(1, moe.router.shape[1], generator=torch.Generator().manual_seed(0)).to(tts.model.device, tts.model.dtype)
+        experts = moe.banks.gate.shape[0]  # differs per layer
+        ids = torch.randperm(experts, generator=torch.Generator().manual_seed(1))[:8].view(1, 8).to(tts.model.device)
+        weights = torch.full((1, 8), 1 / 8, device=tts.model.device)
+        host = [t.cpu().pin_memory() for t in (moe.banks.gate, moe.banks.up, moe.banks.down)]
+        saved = kernels.MOE_BLOCK_N, kernels.MOE_BLOCK_N_HOST
+        outputs = []
+        for tile in (8, 16, 32):
+            kernels.MOE_BLOCK_N = kernels.MOE_BLOCK_N_HOST = tile
+            outputs.append(kernels.iq3_moe(x, ids, weights, moe.banks.gate, moe.banks.up, moe.banks.down).clone())
+            outputs.append(kernels.iq3_moe(x, ids, weights, *host).clone())
+        kernels.MOE_BLOCK_N, kernels.MOE_BLOCK_N_HOST = saved
+        print("iq3_moe identical for tiles 8/16/32, VRAM and host banks:", all(torch.equal(outputs[0], o) for o in outputs[1:]))
+
     t = time.time()
     first = tts.generate("[a gentle, soft-spoken woman's voice] Hello! This is a quick test of drama3-small.",
                          sampling=Sampling(seed=7))

@@ -233,6 +233,9 @@ def q8_dequant(qs: torch.Tensor, d: torch.Tensor, dtype: torch.dtype) -> torch.T
 
 GEMV_MAX_ROWS = 4
 MOE_BLOCK_N = int(os.environ.get("DRAMA3_MOE_BLOCK_N", "16"))
+# Rows per program when the expert banks sit in pinned host memory (expert offload): the kernel then reads them over PCIe, where a
+# larger tile moves more bytes per round trip. The tile only changes how rows are grouped, not the arithmetic of a row.
+MOE_BLOCK_N_HOST = int(os.environ.get("DRAMA3_MOE_BLOCK_N_HOST", "32"))
 MOE_DOWN_SPLIT = os.environ.get("DRAMA3_MOE_DOWN_SPLIT", "0") == "1"
 
 
@@ -309,7 +312,7 @@ def iq3_moe(x: torch.Tensor, ids: torch.Tensor, weights: torch.Tensor,
         weights = ARENA.input(weights.float())
         grid = iq3_grid(x.device)
         h = ARENA.empty((m * top_k, inter), torch.float32, x.device)
-        BLOCK_N = MOE_BLOCK_N
+        BLOCK_N = MOE_BLOCK_N if gate.is_cuda else MOE_BLOCK_N_HOST
         _iq3_gate_up_kernel[(inter // BLOCK_N, m * top_k)](
             x, ids32, gate, up, grid, h, inter, x.stride(0), gate.shape[2], gate.shape[1] * gate.shape[2],
             TOPK=top_k, NB=hidden // 256, BLOCK_N=BLOCK_N, num_warps=4)
